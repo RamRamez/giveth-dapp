@@ -1,90 +1,84 @@
-import React, { Component } from 'react';
-import { PageHeader, Row, Col, Form, Input, Select, Button } from 'antd';
+import React, { useContext, useState, Fragment } from 'react';
+import { PageHeader, Row, Col, Form, Input, Select, Button, Typography } from 'antd';
 import 'antd/dist/antd.css';
 import PropTypes from 'prop-types';
 import { v4 as uuidv4 } from 'uuid';
-import CampaignService from '../../services/CampaignService';
-import ExpenseCreateForm from '../ExpenseCreateForm';
+import CreateExpenseItem from '../CreateExpenseItem';
+import useCampaign from '../../hooks/useCampaign';
+import { Context as WhiteListContext } from '../../contextProviders/WhiteListProvider';
+import { Context as ConversionRateContext } from '../../contextProviders/ConversionRateProvider';
+import Web3ConnectWarning from '../Web3ConnectWarning';
+import { MilestoneCampaignInfo, MilestoneTitle } from '../EditMilestoneCommons';
 
-class CreateExpense extends Component {
-  constructor(props) {
-    super(props);
-    this.currencies = [
-      'ETH',
-      'DAI',
-      'PAN',
-      'BTC',
-      'USDC',
-      'USD',
-      'AUD',
-      'BRL',
-      'CAD',
-      'CHF',
-      'CZK',
-      'EUR',
-      'GBP',
-      'MXN',
-      'THB',
-    ];
-    this.state = {
-      campaign: {},
-      expenses: [
-        {
-          amount: '',
-          currency: '',
-          date: '',
-          description: '',
-          picture: '',
-          key: uuidv4(),
-        },
-      ],
-      reimbursementCurrency: undefined,
-      wallet: undefined,
-    };
-    this.goBack = this.goBack.bind(this);
-    this.handleInputChange = this.handleInputChange.bind(this);
-    this.handleSelectReimbursementCurrency = this.handleSelectReimbursementCurrency.bind(this);
-    this.addExpense = this.addExpense.bind(this);
-    this.updateStateOfexpenses = this.updateStateOfexpenses.bind(this);
-  }
+function CreateExpense(props) {
+  const {
+    state: { activeTokenWhitelist },
+  } = useContext(WhiteListContext);
 
-  async componentDidMount() {
-    const campaignId = this.props.match.params.id;
-    const campaign = await CampaignService.get(campaignId);
-    this.setState({
-      campaign,
-    });
-  }
+  const {
+    actions: { getConversionRates }
+  } = useContext(ConversionRateContext);
 
-  componentDidUpdate() {
-    console.log(this.state);
-  }
+  const campaign = useCampaign(props.match.params.id);
+  const [expenseForm, setExpenseForm] = useState({
+    expenses: [
+      {
+        amount: '',
+        currency: '',
+        date: '',
+        description: '',
+        picture: '',
+        key: uuidv4(),
+      },
+    ],
+    title: '',
+    reimbursementCurrency: undefined,
+    wallet: undefined,
+  });
+  const [expenseSum, setExpenseSum] = useState(0)
 
-  handleInputChange(event) {
-    const { target } = event;
-    const value = target.type === 'checkbox' ? target.checked : target.value;
-    const { name } = target;
-    this.setState({
-      [name]: value,
-    });
-  }
-
-  updateStateOfexpenses(name, value, expKey) {
-    const expenses = [...this.state.expenses];
+  function updateStateOfexpenses(name, value, expKey) {
+    const expenses = [...expenseForm.expenses];
     const expense = expenses.find(exp => exp.key === expKey);
     expense[name] = value;
 
-    this.setState({ expenses: [...expenses] });
+    setExpenseForm({ ...setExpenseForm, expenses });
   }
 
-  handleSelectReimbursementCurrency(_, option) {
-    this.setState({ reimbursementCurrency: option.value });
+  const handleInputChange = event => {
+    const { name, value, type, checked } = event.target;
+    if (type === 'checkbox') {
+      setExpenseForm({ ...expenseForm, [name]: checked });
+    } else {
+      setExpenseForm({ ...expenseForm, [name]: value });
+    }
+  };
+
+  function handleSelectReimbursementCurrency(_, option) {
+    handleInputChange({
+      target: { name: 'reimbursementCurrency', value: option.value },
+    });
+    let promises = [], expensesSum = 0
+    const token = activeTokenWhitelist.find(t => t.name === option.value);
+    const destCurrency = token.rateEqSymbol !== undefined ? token.rateEqSymbol : token.symbol
+    expenseForm.expenses.forEach(item => {
+      promises.push( getConversionRates(new Date(item.date), item.currency, destCurrency) )
+    })
+    
+    Promise.all(promises)
+      .then(res => {
+        res.forEach((item, i) => {
+          item && (expensesSum += item.rates[destCurrency] * expenseForm.expenses[i].amount)
+        })
+        setExpenseSum(expensesSum)
+      })
   }
 
-  addExpense() {
-    this.setState(prevState => ({
+  function addExpense() {
+    setExpenseForm({
+      ...expenseForm,
       expenses: [
-        ...prevState.expenses,
+        ...expenseForm.expenses,
         {
           amount: '',
           currency: '',
@@ -94,54 +88,70 @@ class CreateExpense extends Component {
           key: uuidv4(),
         },
       ],
-    }));
+    });
   }
 
-  goBack() {
-    this.props.history.push(`/campaigns/${this.props.match.params.id}/new`);
+  function removeExpense(key) {
+    const filteredExpenses = expenseForm.expenses.filter(expense => expense.key !== key);
+    setExpenseForm({
+      ...expenseForm,
+      expenses: filteredExpenses,
+    });
   }
 
-  render() {
-    const {
-      campaign,
-      expenses,
-      // picture,
-      reimbursementCurrency,
-      wallet,
-    } = this.state;
-    return (
-      <div id="create-expense-view">
+  function goBack() {
+    props.history.goBack();
+  }
+
+  const submit = async () => {};
+
+  return (
+    <Fragment>
+      <Web3ConnectWarning />
+
+      <div id="create-milestone-view">
         <Row>
           <Col span={24}>
             <PageHeader
-              className="site-page-header my-test"
-              onBack={this.goBack}
+              className="site-page-header"
+              onBack={goBack}
               title="Create New Expense"
+              ghost={false}
             />
           </Col>
         </Row>
         <Row>
           <div className="card-form-container">
-            <Form className="card-form">
+            <Form className="card-form" requiredMark onFinish={submit}>
               <div className="card-form-header">
                 <img src={`${process.env.PUBLIC_URL}/img/expense.png`} alt="expense-logo" />
                 <div className="title">Expense</div>
               </div>
-              <div className="campaign-info">
-                <div className="lable">Campaign</div>
-                <div className="content">{campaign.title}</div>
+
+              <MilestoneCampaignInfo campaign={campaign} />
+
+              <MilestoneTitle
+                onChange={handleInputChange}
+                value={expenseForm.title}
+                extra="What is the purpose of these expenses?"
+              />
+
+              <div className="section">
+                <div className="title">Expense details</div>
+                {expenseForm.expenses.map((expense, idx) => (
+                  <CreateExpenseItem
+                    key={expense.key}
+                    expense={expense}
+                    id={idx}
+                    updateStateOfexpenses={updateStateOfexpenses}
+                    removeExpense={removeExpense}
+                    removeAble={expenseForm.expenses.length > 1}
+                  />
+                ))}
+                <Button onClick={addExpense} className="add-expense-button">
+                  Add new Expense
+                </Button>
               </div>
-              {expenses.map((expense, idx) => (
-                <ExpenseCreateForm
-                  key={expense.key}
-                  expense={expense}
-                  id={idx}
-                  updateStateOfexpenses={this.updateStateOfexpenses}
-                />
-              ))}
-              <Button onClick={this.addExpense} className="add-expense-button">
-                Add new Expense
-              </Button>
 
               <div className="section">
                 <div className="title">Reimbursement options</div>
@@ -149,44 +159,52 @@ class CreateExpense extends Component {
                   name="reimbursementCurrency"
                   label="Reimburse in Currency"
                   className="custom-form-item"
+                  extra="Select the token you want to be reimbursed in."
                 >
-                  <Select
-                    showSearch
-                    placeholder="Select a Currency"
-                    optionFilterProp="children"
-                    name="reimbursementCurrency"
-                    onSelect={this.handleSelectReimbursementCurrency}
-                    filterOption={(input, option) =>
-                      option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
-                    }
-                    value={reimbursementCurrency}
-                    required
-                  >
-                    {this.currencies.map(cur => (
-                      <Select.Option key={cur} value={cur}>
-                        {cur}
-                      </Select.Option>
-                    ))}
-                  </Select>
+                  <Row gutter={16} align="middle">
+                    <Col className="gutter-row" span={12}>
+                      <Select
+                        showSearch
+                        placeholder="Select a Currency"
+                        optionFilterProp="children"
+                        name="reimbursementCurrency"
+                        onSelect={handleSelectReimbursementCurrency}
+                        filterOption={(input, option) =>
+                          option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
+                        }
+                        value={expenseForm.reimbursementCurrency}
+                        required
+                      >
+                        {activeTokenWhitelist.map(token => (
+                          <Select.Option key={token.name} value={token.name}>
+                            {token.name}
+                          </Select.Option>
+                        ))}
+                      </Select>
+                    </Col>
+                    <Col className="gutter-row" span={12}>
+                      <Typography.Text className="ant-form-text" type="secondary">
+                        ≈ {expenseSum}
+                      </Typography.Text>
+                    </Col>
+                  </Row>
                 </Form.Item>
-                <div className="form-item-desc">Select the token you want to be reimbursed in.</div>
+
                 <Form.Item
                   name="wallet"
                   label="Reimburse to wallet address"
                   className="custom-form-item"
+                  extra="If you don’t change this field the address associated with your account will be
+                used."
                 >
                   <Input
-                    value={wallet}
+                    value={expenseForm.wallet}
                     name="wallet"
                     placeholder="0x"
-                    onChange={this.handleInputChange}
+                    onChange={handleInputChange}
                     required
                   />
                 </Form.Item>
-                <div className="form-item-desc">
-                  If you don’t change this field the address associated with your account will be
-                  used.
-                </div>
               </div>
               <Form.Item>
                 <Button type="primary" htmlType="submit" className="submit-button">
@@ -197,8 +215,8 @@ class CreateExpense extends Component {
           </div>
         </Row>
       </div>
-    );
-  }
+    </Fragment>
+  );
 }
 
 CreateExpense.propTypes = {
